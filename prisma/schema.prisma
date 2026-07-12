@@ -1,0 +1,307 @@
+// HealthAI — PostgreSQL schema (hosted on Supabase)
+// Generator: Prisma Client. Run `npx prisma generate` then `npx prisma migrate dev`.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Gender {
+  MALE
+  FEMALE
+  NON_BINARY
+  OTHER
+}
+
+enum ActivityLevel {
+  SEDENTARY
+  LIGHT
+  MODERATE
+  ACTIVE
+  VERY_ACTIVE
+}
+
+enum ExerciseType {
+  CARDIO
+  STRENGTH
+  FLEXIBILITY
+  BALANCE
+  SPORT
+  OTHER
+}
+
+enum SleepQuality {
+  POOR
+  FAIR
+  GOOD
+  EXCELLENT
+}
+
+enum GoalStatus {
+  ACTIVE
+  ACHIEVED
+  PAUSED
+  ABANDONED
+}
+
+enum TokenKind {
+  ACCESS
+  REFRESH
+}
+
+// ---------------------------------------------------------------------------
+// Composite types (embedded, no table of their own)
+// ---------------------------------------------------------------------------
+
+// NutritionTotals model replaced with flat fields on related models.
+// Individual food log items are now represented by NutritionLogItem.
+
+// ---------------------------------------------------------------------------
+// Core user + profile
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String?
+  googleId     String?  @unique
+  appleId      String?  @unique
+  twoFASecret  String? // encrypted with TWOFA_ENCRYPTION_KEY
+  twoFAEnabled Boolean  @default(false)
+  emailVerified Boolean @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  profile        Profile?
+  healthProfile  HealthProfile?
+  nutritionLogs  NutritionLog[]
+  exerciseLogs   ExerciseLog[]
+  workouts       WorkoutPlan[]
+  weightEntries  WeightEntry[]
+  sleepEntries   SleepEntry[]
+  waterEntries   WaterEntry[]
+  goals          Goal[]
+  achievements   Achievement[]
+  refreshTokens  RefreshToken[]
+  aiUsage        AiUsage[]
+}
+
+model Profile {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  firstName String?
+  lastName  String?
+  birthDate DateTime?
+  gender    Gender?
+  heightCm  Int?
+  avatarUrl String?
+  timezone  String   @default("UTC")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// Long-term health context used by the recommendation engine.
+model HealthProfile {
+  id            String        @id @default(uuid())
+  userId        String        @unique
+  activityLevel ActivityLevel @default(MODERATE)
+  weightGoalKg  Float?
+  dailyCalorieTarget Int?
+  proteinTarget Float?
+  waterTargetMl Int          @default(2500)
+  sleepTargetMin Int         @default(420)
+  restrictions  String[] // e.g. "vegetarian", "gluten-free"
+  allergies     String[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------------------
+// Authentication — refresh token rotation
+// ---------------------------------------------------------------------------
+
+model RefreshToken {
+  id        String     @id @default(uuid())
+  userId    String
+  tokenHash String     @unique // SHA-256 of the raw refresh token
+  kind     TokenKind   @default(REFRESH)
+  expiresAt DateTime
+  revoked   Boolean    @default(false)
+  createdAt DateTime   @default(now())
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Nutrition
+// ---------------------------------------------------------------------------
+
+model NutritionLog {
+  id        String       @id @default(uuid())
+  userId    String
+  mealTime  DateTime
+  mealType  String // BREAKFAST | LUNCH | DINNER | SNACK
+  items     Json // array of logged foods (typed via src/types/nutrition.ts)
+  totals    Json // aggregated NutritionTotals (typed via src/types/nutrition.ts)
+  createdAt DateTime     @default(now())
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, mealTime])
+}
+
+/// Global food database (seeded / imported). Not user-scoped.
+model FoodDatabase {
+  id           String   @id
+  name         String
+  brand        String?
+  servingSizeG Float
+  barcode      String?  @unique
+  nutrition    Json
+  source       String   @default("usda")
+  createdAt    DateTime @default(now())
+
+  @@index([name])
+}
+
+// ---------------------------------------------------------------------------
+// Exercise + Workout planner
+// ---------------------------------------------------------------------------
+
+model ExerciseLog {
+  id             String       @id @default(uuid())
+  userId         String
+  date           DateTime     @default(now())
+  type           ExerciseType
+  name           String
+  durationMin    Int
+  caloriesBurned Int?
+  steps          Int?
+  notes          String?
+  createdAt      DateTime     @default(now())
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, date])
+}
+
+model WorkoutPlan {
+  id        String   @id @default(uuid())
+  userId    String
+  name      String
+  weekStart DateTime
+  days      Json // structured weekly plan (see src/types for shape)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Health trackers
+// ---------------------------------------------------------------------------
+
+model WeightEntry {
+  id        String   @id @default(uuid())
+  userId    String
+  date      DateTime @default(now())
+  weightKg  Float
+  bodyFatPct Float?
+  muscleKg  Float?
+  note      String?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, date])
+}
+
+model SleepEntry {
+  id          String        @id @default(uuid())
+  userId      String
+  date        DateTime      @default(now())
+  durationMin Int
+  deepMin     Int?
+  remMin      Int?
+  lightMin    Int?
+  quality     SleepQuality?
+  note        String?
+  createdAt   DateTime      @default(now())
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, date])
+}
+
+model WaterEntry {
+  id        String   @id @default(uuid())
+  userId    String
+  date      DateTime @default(now())
+  volumeMl  Int
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, date])
+}
+
+// ---------------------------------------------------------------------------
+// Goals + Achievements
+// ---------------------------------------------------------------------------
+
+model Goal {
+  id        String     @id @default(uuid())
+  userId    String
+  title     String
+  metric    String // WEIGHT | WATER | SLEEP | WORKOUT | NUTRITION
+  target    Float
+  current   Float      @default(0)
+  unit      String
+  status    GoalStatus @default(ACTIVE)
+  dueDate   DateTime?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Achievement {
+  id        String   @id @default(uuid())
+  userId    String
+  code      String
+  title     String
+  earnedAt  DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, code])
+}
+
+// ---------------------------------------------------------------------------
+// AI usage audit (rate limiting / billing)
+// ---------------------------------------------------------------------------
+
+model AiUsage {
+  id        String   @id @default(uuid())
+  userId    String
+  feature   String // chat | vision | recommendation
+  tokensIn  Int      @default(0)
+  tokensOut Int      @default(0)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
